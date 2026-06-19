@@ -1,18 +1,25 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle, Download, FileSpreadsheet, Upload } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  CheckCircle,
+  Download,
+  FileSpreadsheet,
+  SearchCheck,
+  Upload,
+} from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ErrorNote } from "@/components/ui/error-note";
-import { Input, Label } from "@/components/ui/field";
-import { Badge } from "@/components/ui/status";
+import { Input, Label, Select } from "@/components/ui/field";
+import { Badge, statusTone } from "@/components/ui/status";
 import { TCell, TH, THead, Table } from "@/components/ui/table";
 import { PageHeading } from "@/features/common/page-heading";
-import { apiFetch } from "@/lib/api/client";
+import { apiFetch, buildQuery } from "@/lib/api/client";
+import { formatDateTime, toArray } from "@/lib/utils/format";
 
 type ImportRow = {
   product_sku?: string;
@@ -60,8 +67,28 @@ function productName(product: Record<string, unknown>) {
   );
 }
 
+function productSupplierId(product: Record<string, unknown> | undefined) {
+  if (!product) return "";
+  return String(product.supplierId ?? product.supplier_id ?? "");
+}
+
+function documentForm(
+  file: File,
+  productId: string,
+  supplierId: string | undefined,
+) {
+  const form = new FormData();
+  form.set("file", file);
+  form.set("product_id", productId);
+  form.set("pack_key", "battery-passport-readiness");
+  if (supplierId) form.set("supplier_id", supplierId);
+  return form;
+}
+
 export function ReadinessCheckScreen() {
   const [file, setFile] = useState<File | null>(null);
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [selectedProductId, setSelectedProductId] = useState("");
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
   const queryClient = useQueryClient();
@@ -91,6 +118,7 @@ export function ReadinessCheckScreen() {
     onSuccess: (data) => {
       setResult(data);
       setPreview(data);
+      setSelectedProductId(String(data.products?.[0]?.id ?? ""));
       queryClient.invalidateQueries({ queryKey: ["products"] });
       queryClient.invalidateQueries({ queryKey: ["suppliers"] });
       queryClient.invalidateQueries({ queryKey: ["reports", "overview"] });
@@ -100,6 +128,47 @@ export function ReadinessCheckScreen() {
   const rows = preview?.rows ?? [];
   const errors = preview?.errors ?? [];
   const importedProducts = result?.products ?? [];
+  const selectedProduct = importedProducts.find(
+    (product) => String(product.id) === selectedProductId,
+  );
+  const documents = useQuery({
+    queryKey: ["documents", selectedProductId],
+    queryFn: () =>
+      apiFetch<unknown>(
+        `/documents${buildQuery({ product_id: selectedProductId })}`,
+      ),
+    enabled: Boolean(selectedProductId),
+    refetchInterval: (query) => {
+      const items = toArray<Record<string, unknown>>(query.state.data);
+      return items.some((item) =>
+        ["uploaded", "processing"].includes(String(item.status ?? "")),
+      )
+        ? 3000
+        : false;
+    },
+  });
+  const uploadDocument = useMutation({
+    mutationFn: async () => {
+      if (!documentFile) throw new Error("Choose a supplier document first.");
+      if (!selectedProductId) throw new Error("Select a product first.");
+      return apiFetch<Record<string, unknown>>("/documents", {
+        method: "POST",
+        body: documentForm(
+          documentFile,
+          selectedProductId,
+          productSupplierId(selectedProduct) || undefined,
+        ),
+      });
+    },
+    onSuccess: () => {
+      setDocumentFile(null);
+      queryClient.invalidateQueries({ queryKey: ["documents"] });
+      queryClient.invalidateQueries({
+        queryKey: ["product", selectedProductId],
+      });
+    },
+  });
+  const documentRows = toArray<Record<string, unknown>>(documents.data);
 
   return (
     <>
@@ -271,6 +340,122 @@ export function ReadinessCheckScreen() {
           ) : null}
         </div>
       </div>
+      <Card className="mt-4">
+        <CardHeader>
+          <CardTitle>Upload first supplier document</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {importedProducts.length === 0 ? (
+            <p className="text-sm text-slate-500">
+              Import product and supplier rows first, then upload the first PDF,
+              XLSX or CSV evidence document.
+            </p>
+          ) : (
+            <>
+              <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+                <div>
+                  <Label htmlFor="readiness-product">Product</Label>
+                  <Select
+                    id="readiness-product"
+                    value={selectedProductId}
+                    onChange={(event) =>
+                      setSelectedProductId(event.target.value)
+                    }
+                  >
+                    {importedProducts.map((product) => (
+                      <option
+                        key={String(product.id)}
+                        value={String(product.id)}
+                      >
+                        {String(product.sku ?? product.id)} -{" "}
+                        {productName(product)}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="readiness-document">Supplier document</Label>
+                  <Input
+                    id="readiness-document"
+                    type="file"
+                    accept=".pdf,.xlsx,.csv"
+                    onChange={(event) =>
+                      setDocumentFile(event.target.files?.[0] ?? null)
+                    }
+                  />
+                </div>
+                <Button
+                  className="mt-5"
+                  onClick={() => uploadDocument.mutate()}
+                  disabled={
+                    !documentFile ||
+                    !selectedProductId ||
+                    uploadDocument.isPending
+                  }
+                >
+                  <Upload className="size-4" />
+                  Upload and extract
+                </Button>
+              </div>
+              {uploadDocument.isError ? (
+                <ErrorNote error={uploadDocument.error} />
+              ) : null}
+              {documents.isError ? <ErrorNote error={documents.error} /> : null}
+              {documentRows.length === 0 ? (
+                <p className="text-sm text-slate-500">
+                  No documents uploaded for this product yet.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <THead>
+                      <tr>
+                        <TH>Name</TH>
+                        <TH>Status</TH>
+                        <TH>Pack</TH>
+                        <TH>Uploaded</TH>
+                        <TH>Review</TH>
+                      </tr>
+                    </THead>
+                    <tbody>
+                      {documentRows.map((document) => (
+                        <tr key={String(document.id)}>
+                          <TCell>
+                            {String(
+                              document.filename ?? document.name ?? document.id,
+                            )}
+                          </TCell>
+                          <TCell>
+                            <Badge
+                              value={document.status ?? "uploaded"}
+                              tone={statusTone(document.status)}
+                            />
+                          </TCell>
+                          <TCell>{String(document.packKey ?? "")}</TCell>
+                          <TCell>
+                            {formatDateTime(
+                              document.createdAt ?? document.uploadedAt,
+                            )}
+                          </TCell>
+                          <TCell>
+                            <Link
+                              className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 hover:bg-slate-50"
+                              href={`/products/${selectedProductId}`}
+                            >
+                              <SearchCheck className="size-4" />
+                              Review evidence
+                            </Link>
+                          </TCell>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </Table>
+                </div>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
     </>
   );
 }
