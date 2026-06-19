@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RotateCcw, SearchCheck, Upload } from "lucide-react";
+import { Clock, RotateCcw, SearchCheck, Upload } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -21,6 +21,7 @@ type Props = {
   suppliers?: Array<Record<string, unknown>>;
   initialProductId?: string;
   emptyState?: string;
+  onProductChange?: (productId: string) => void;
 };
 
 function productName(product: Record<string, unknown>) {
@@ -67,6 +68,12 @@ function EvidenceCandidateCount({ documentId }: { documentId: string }) {
     return <span className="text-xs text-red-700">Fields unavailable</span>;
   }
 
+  if (fields.isLoading) {
+    return (
+      <span className="text-sm text-slate-500">Counting candidates...</span>
+    );
+  }
+
   return (
     <span className="text-sm text-slate-600">
       {toArray(fields.data).length} candidates
@@ -85,10 +92,14 @@ function DocumentRow({
   const retry = useMutation({
     mutationFn: (id: string) =>
       apiFetch(`/documents/${id}/retry`, { method: "POST", body: {} }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["documents"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["documents"] });
+      queryClient.invalidateQueries({ queryKey: ["product", productId] });
+    },
   });
   const status = String(document.status ?? "uploaded");
   const documentId = String(document.id ?? "");
+  const failureReason = String(document.failureReason ?? "");
 
   return (
     <tr>
@@ -101,6 +112,10 @@ function DocumentRow({
       <TCell>
         {status === "processed" ? (
           <EvidenceCandidateCount documentId={documentId} />
+        ) : status === "failed" ? (
+          <span className="text-sm text-red-700">
+            {failureReason || "Extraction failed"}
+          </span>
         ) : (
           <span className="text-sm text-slate-500">Waiting for extraction</span>
         )}
@@ -115,7 +130,7 @@ function DocumentRow({
             <RotateCcw className="size-4" />
             Retry
           </Button>
-        ) : (
+        ) : status === "processed" ? (
           <Link
             className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 hover:bg-slate-50"
             href={`/products/${productId}`}
@@ -123,6 +138,11 @@ function DocumentRow({
             <SearchCheck className="size-4" />
             Review evidence
           </Link>
+        ) : (
+          <span className="inline-flex h-9 items-center gap-2 text-sm text-slate-500">
+            <Clock className="size-4" />
+            Processing
+          </span>
         )}
       </TCell>
     </tr>
@@ -136,6 +156,7 @@ export function BuyerDocumentWorkflow({
   suppliers = [],
   initialProductId = "",
   emptyState = "Select a product before uploading supplier evidence.",
+  onProductChange,
 }: Props) {
   const [selectedProductId, setSelectedProductId] = useState(initialProductId);
   const [selectedSupplierId, setSelectedSupplierId] = useState("");
@@ -144,8 +165,11 @@ export function BuyerDocumentWorkflow({
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    if (initialProductId) setSelectedProductId(initialProductId);
-  }, [initialProductId]);
+    if (initialProductId) {
+      setSelectedProductId(initialProductId);
+      onProductChange?.(initialProductId);
+    }
+  }, [initialProductId, onProductChange]);
 
   const selectedProduct = products.find(
     (product) => String(product.id) === selectedProductId,
@@ -206,7 +230,9 @@ export function BuyerDocumentWorkflow({
                   id="buyer-document-product"
                   value={selectedProductId}
                   onChange={(event) => {
-                    setSelectedProductId(event.target.value);
+                    const productId = event.target.value;
+                    setSelectedProductId(productId);
+                    onProductChange?.(productId);
                     setSelectedSupplierId("");
                   }}
                 >

@@ -1,7 +1,14 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle, Download, FileSpreadsheet, Upload } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  AlertTriangle,
+  CheckCircle,
+  Download,
+  FileSpreadsheet,
+  SearchCheck,
+  Upload,
+} from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -9,11 +16,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ErrorNote } from "@/components/ui/error-note";
 import { Input, Label } from "@/components/ui/field";
-import { Badge } from "@/components/ui/status";
+import { Badge, ReadinessBar } from "@/components/ui/status";
 import { TCell, TH, THead, Table } from "@/components/ui/table";
 import { BuyerDocumentWorkflow } from "@/features/documents/buyer-document-workflow";
 import { PageHeading } from "@/features/common/page-heading";
 import { apiFetch } from "@/lib/api/client";
+import { toArray } from "@/lib/utils/format";
 
 type ImportRow = {
   product_sku?: string;
@@ -58,6 +66,145 @@ function importForm(file: File) {
 function productName(product: Record<string, unknown>) {
   return String(
     product.name ?? product.productName ?? product.sku ?? product.id,
+  );
+}
+
+function qualityValue(summary: unknown, key: string) {
+  if (!summary || typeof summary !== "object") return 0;
+  return Number((summary as Record<string, unknown>)[key] ?? 0);
+}
+
+function candidateCount(rows: Array<Record<string, unknown>>) {
+  return rows.reduce((count, row) => {
+    const candidates = row.candidates;
+    return count + (Array.isArray(candidates) ? candidates.length : 0);
+  }, 0);
+}
+
+function blockerRows(rows: Array<Record<string, unknown>>) {
+  return rows.filter((row) =>
+    ["conflicting", "expired", "low_confidence", "missing"].includes(
+      String(row.status ?? ""),
+    ),
+  );
+}
+
+function ReadinessPilotSummary({ productId }: { productId: string }) {
+  const readiness = useQuery({
+    queryKey: ["product", productId, "readiness"],
+    queryFn: () =>
+      apiFetch<Record<string, unknown>>(`/products/${productId}/readiness`),
+    enabled: Boolean(productId),
+    refetchInterval: 3000,
+  });
+  const inbox = useQuery({
+    queryKey: ["product", productId, "inbox"],
+    queryFn: () => apiFetch<unknown>(`/products/${productId}/evidence-inbox`),
+    enabled: Boolean(productId),
+    refetchInterval: 3000,
+  });
+  const rows = toArray<Record<string, unknown>>(inbox.data);
+  const blockers = blockerRows(rows);
+  const candidates = candidateCount(rows);
+  const qualitySummary = readiness.data?.qualitySummary;
+  const score = readiness.data?.readinessScore ?? readiness.data?.score;
+  const isLoading = readiness.isLoading || inbox.isLoading;
+
+  if (!productId) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Live pilot status</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {readiness.isError ? <ErrorNote error={readiness.error} /> : null}
+        {inbox.isError ? <ErrorNote error={inbox.error} /> : null}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-950">
+              {blockers.length > 0 ? (
+                <AlertTriangle className="size-4 text-amber-700" />
+              ) : (
+                <SearchCheck className="size-4 text-teal-700" />
+              )}
+              {isLoading
+                ? "Checking extracted evidence"
+                : blockers.length > 0
+                  ? "First blockers are ready to review"
+                  : candidates > 0
+                    ? "Extracted evidence is ready to review"
+                    : "Upload a supplier document to start extraction"}
+            </div>
+            <p className="mt-1 text-sm text-slate-500">
+              {candidates > 0
+                ? `${candidates} extracted candidates found for this product.`
+                : "The pilot summary updates from the live product inbox."}
+            </p>
+          </div>
+          <Link
+            className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 hover:bg-slate-50"
+            href={`/products/${productId}`}
+          >
+            <SearchCheck className="size-4" />
+            Review product
+          </Link>
+        </div>
+        <div className="grid gap-3 md:grid-cols-[160px_1fr]">
+          <div className="rounded-md bg-slate-50 p-3">
+            <div className="text-xs font-medium text-slate-500">
+              Readiness score
+            </div>
+            <div className="mt-2">
+              <ReadinessBar value={score} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-5">
+            <div className="rounded-md bg-slate-50 p-2">
+              <div className="text-xs text-slate-500">Accepted</div>
+              <div className="font-medium">
+                {String(qualityValue(qualitySummary, "acceptedValid"))}
+              </div>
+            </div>
+            <div className="rounded-md bg-slate-50 p-2">
+              <div className="text-xs text-slate-500">Missing</div>
+              <div className="font-medium">
+                {String(qualityValue(qualitySummary, "missing"))}
+              </div>
+            </div>
+            <div className="rounded-md bg-slate-50 p-2">
+              <div className="text-xs text-slate-500">Conflicts</div>
+              <div className="font-medium">
+                {String(qualityValue(qualitySummary, "conflicting"))}
+              </div>
+            </div>
+            <div className="rounded-md bg-slate-50 p-2">
+              <div className="text-xs text-slate-500">Expired</div>
+              <div className="font-medium">
+                {String(qualityValue(qualitySummary, "expired"))}
+              </div>
+            </div>
+            <div className="rounded-md bg-slate-50 p-2">
+              <div className="text-xs text-slate-500">Low confidence</div>
+              <div className="font-medium">
+                {String(qualityValue(qualitySummary, "lowConfidence"))}
+              </div>
+            </div>
+          </div>
+        </div>
+        {blockers.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {blockers.slice(0, 4).map((row) => (
+              <Badge
+                key={String(row.fieldKey ?? row.label)}
+                value={`${String(row.label ?? row.fieldKey)}: ${String(row.status)}`}
+                tone="warn"
+              />
+            ))}
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -283,8 +430,14 @@ export function ReadinessCheckScreen() {
           products={importedProducts}
           suppliers={importedSuppliers}
           initialProductId={selectedProductId}
+          onProductChange={setSelectedProductId}
           emptyState="Import product and supplier rows first, then upload the first evidence document."
         />
+        {selectedProductId ? (
+          <div className="mt-4">
+            <ReadinessPilotSummary productId={selectedProductId} />
+          </div>
+        ) : null}
       </div>
     </>
   );
