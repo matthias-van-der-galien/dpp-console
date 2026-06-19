@@ -84,6 +84,77 @@ async function mockCoreApi(page: Page) {
   await page.route(`${apiBase}/suppliers`, async (route) => {
     await route.fulfill({ json: [supplier] });
   });
+  await page.route(`${apiBase}/documents`, async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({
+        status: 201,
+        json: {
+          id: "document-processed",
+          filename: "supplier-evidence.pdf",
+          status: "processed",
+          productId: "product-1",
+          supplierId: "supplier-1",
+          packKey: "battery-passport-readiness",
+          createdAt: "2026-06-19T00:00:00.000Z",
+        },
+      });
+      return;
+    }
+    await route.fulfill({
+      json: { items: [], nextCursor: null },
+    });
+  });
+  await page.route(`${apiBase}/documents?*`, async (route) => {
+    await route.fulfill({
+      json: {
+        items: [
+          {
+            id: "document-processed",
+            filename: "supplier-evidence.pdf",
+            status: "processed",
+            productId: "product-1",
+            supplierId: "supplier-1",
+            packKey: "battery-passport-readiness",
+            createdAt: "2026-06-19T00:00:00.000Z",
+          },
+          {
+            id: "document-failed",
+            filename: "failed-evidence.pdf",
+            status: "failed",
+            productId: "product-1",
+            supplierId: "supplier-1",
+            packKey: "battery-passport-readiness",
+            createdAt: "2026-06-18T00:00:00.000Z",
+          },
+        ],
+        nextCursor: null,
+      },
+    });
+  });
+  await page.route(
+    `${apiBase}/documents/document-processed/extracted-fields`,
+    async (route) => {
+      await route.fulfill({
+        json: Array.from({ length: 8 }, (_, index) => ({
+          id: `candidate-${index + 1}`,
+          fieldKey: `field_${index + 1}`,
+          value: `value ${index + 1}`,
+        })),
+      });
+    },
+  );
+  await page.route(
+    `${apiBase}/documents/document-failed/retry`,
+    async (route) => {
+      await route.fulfill({
+        json: {
+          id: "document-failed",
+          filename: "failed-evidence.pdf",
+          status: "processing",
+        },
+      });
+    },
+  );
   await page.route(
     `${apiBase}/products/product-1/evidence-inbox`,
     async (route) => {
@@ -315,6 +386,25 @@ test("readiness check previews valid CSV and commits import", async ({
   await expect(page.getByText("BAT-001")).toBeVisible();
   await page.getByRole("button", { name: "Import rows" }).click();
   await expect(page.getByText("Imported 1 rows.")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Upload first supplier document" }),
+  ).toBeVisible();
+  await page.getByLabel("Supplier document").setInputFiles({
+    name: "supplier-evidence.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from("demo pdf"),
+  });
+  const uploadRequest = page.waitForRequest(
+    (request) =>
+      request.url() === `${apiBase}/documents` && request.method() === "POST",
+  );
+  await page.getByRole("button", { name: "Upload and extract" }).click();
+  await uploadRequest;
+  await expect(page.getByText("Document uploaded.")).toBeVisible();
+  await expect(page.getByText("8 candidates")).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Review evidence" }).first(),
+  ).toHaveAttribute("href", "/products/product-1");
 });
 
 test("readiness check shows invalid import row errors", async ({ page }) => {
@@ -400,4 +490,19 @@ test("supplier token page uploads and completes without bearer auth", async ({
   await expect(page.getByText("Document uploaded.")).toBeVisible();
   await page.getByRole("button", { name: "Complete submission" }).click();
   await expect(page.getByText("Submission completed.")).toBeVisible();
+});
+
+test("documents page exposes failed document retry", async ({ page }) => {
+  await login(page);
+  await page.goto("/documents");
+  await page.getByLabel("Product").selectOption("product-1");
+
+  await expect(page.getByText("failed-evidence.pdf")).toBeVisible();
+  const retryResponse = page.waitForResponse(
+    (response) =>
+      response.url() === `${apiBase}/documents/document-failed/retry` &&
+      response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Retry" }).click();
+  await retryResponse;
 });
