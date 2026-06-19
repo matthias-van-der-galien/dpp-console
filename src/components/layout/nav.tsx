@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   Package,
   Radio,
+  SearchCheck,
   ServerCog,
   Truck,
   Users,
@@ -22,6 +23,7 @@ import { cn } from "@/lib/utils/cn";
 
 const nav = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
+  { href: "/readiness-check", label: "Readiness Check", icon: SearchCheck },
   { href: "/products", label: "Products", icon: Package },
   {
     href: "/evidence-requests",
