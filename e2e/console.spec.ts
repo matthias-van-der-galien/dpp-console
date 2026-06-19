@@ -403,8 +403,180 @@ test("readiness check previews valid CSV and commits import", async ({
   await expect(page.getByText("Document uploaded.")).toBeVisible();
   await expect(page.getByText("8 candidates")).toBeVisible();
   await expect(
+    page.getByText("First blockers are ready to review"),
+  ).toBeVisible();
+  await expect(
     page.getByRole("link", { name: "Review evidence" }).first(),
   ).toHaveAttribute("href", "/products/product-1");
+});
+
+test("readiness pilot moves from processing document to review CTA", async ({
+  page,
+}) => {
+  let uploaded = false;
+  let processed = false;
+  let documentPolls = 0;
+
+  await page.route(
+    `${apiBase}/imports/product-suppliers/preview`,
+    async (route) => {
+      await route.fulfill({
+        json: {
+          valid: true,
+          rows: [
+            {
+              product_sku: "BAT-001",
+              product_name: "Battery Module A",
+              supplier_name: "Cell Supplier",
+              supplier_contact_email: "quality@supplier.example",
+              battery_category: "industrial",
+            },
+          ],
+          errors: [],
+        },
+      });
+    },
+  );
+  await page.route(`${apiBase}/imports/product-suppliers`, async (route) => {
+    await route.fulfill({
+      json: {
+        valid: true,
+        imported: 1,
+        rows: [],
+        errors: [],
+        products: [product],
+        suppliers: [supplier],
+      },
+    });
+  });
+  await page.route(`${apiBase}/documents`, async (route) => {
+    if (route.request().method() === "POST") {
+      uploaded = true;
+      await route.fulfill({
+        status: 201,
+        json: {
+          id: "document-live",
+          filename: "pilot-evidence.csv",
+          status: "processing",
+          productId: "product-1",
+          supplierId: "supplier-1",
+          packKey: "battery-passport-readiness",
+          createdAt: "2026-06-19T00:00:00.000Z",
+        },
+      });
+      return;
+    }
+    await route.fallback();
+  });
+  await page.route(`${apiBase}/documents?*`, async (route) => {
+    const status = uploaded && documentPolls > 0 ? "processed" : "processing";
+    if (uploaded) {
+      documentPolls += 1;
+      processed = status === "processed";
+    }
+    await route.fulfill({
+      json: {
+        items: uploaded
+          ? [
+              {
+                id: "document-live",
+                filename: "pilot-evidence.csv",
+                status,
+                productId: "product-1",
+                supplierId: "supplier-1",
+                packKey: "battery-passport-readiness",
+                createdAt: "2026-06-19T00:00:00.000Z",
+              },
+            ]
+          : [],
+        nextCursor: null,
+      },
+    });
+  });
+  await page.route(
+    `${apiBase}/documents/document-live/extracted-fields`,
+    async (route) => {
+      await route.fulfill({
+        json: [
+          {
+            id: "candidate-live-1",
+            fieldKey: "manufacturer_name",
+            value: "Cell Supplier",
+          },
+          {
+            id: "candidate-live-2",
+            fieldKey: "chemistry",
+            value: "LFP",
+          },
+        ],
+      });
+    },
+  );
+  await page.route(
+    `${apiBase}/products/product-1/evidence-inbox`,
+    async (route) => {
+      await route.fulfill({
+        json: processed
+          ? inbox
+          : { pack: { key: "battery-passport-readiness" }, items: [] },
+      });
+    },
+  );
+  await page.route(`${apiBase}/products/product-1/readiness`, async (route) => {
+    await route.fulfill({
+      json: {
+        product,
+        pack: { key: "battery-passport-readiness" },
+        readinessScore: processed ? 42 : 0,
+        qualitySummary: processed
+          ? {
+              acceptedValid: 0,
+              missing: 1,
+              conflicting: 1,
+              expired: 0,
+              lowConfidence: 0,
+            }
+          : {
+              acceptedValid: 0,
+              missing: 0,
+              conflicting: 0,
+              expired: 0,
+              lowConfidence: 0,
+            },
+      },
+    });
+  });
+
+  await login(page);
+  await page.goto("/readiness-check");
+  await page.getByLabel("CSV or XLSX file").setInputFiles({
+    name: "products.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from(
+      "product_sku,product_name,supplier_name\nBAT-001,Battery Module A,Cell Supplier",
+    ),
+  });
+  await page.getByRole("button", { name: "Preview import" }).click();
+  await page.getByRole("button", { name: "Import rows" }).click();
+  await expect(
+    page.getByText("Upload a supplier document to start extraction"),
+  ).toBeVisible();
+
+  await page.getByLabel("Supplier document").setInputFiles({
+    name: "pilot-evidence.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("field,value\nchemistry,LFP"),
+  });
+  await page.getByRole("button", { name: "Upload and extract" }).click();
+
+  await expect(page.getByText("Processing")).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Review evidence" }),
+  ).toBeVisible();
+  await expect(page.getByText("2 candidates")).toBeVisible();
+  await expect(
+    page.getByText("First blockers are ready to review"),
+  ).toBeVisible();
 });
 
 test("readiness check shows invalid import row errors", async ({ page }) => {
