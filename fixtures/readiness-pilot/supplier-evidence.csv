@@ -1,0 +1,10 @@
+field,value
+manufacturer_name,Pilot Cell Supplier
+battery_category,industrial
+production_date,2026-04-10
+chemistry,LFP
+carbon_footprint_kgco2e,42.4 kgco2e
+recycled_content_percent,18 percent
+safety_certificate_id,CERT-DEMO-001
+safety_certificate_expires_at,2027-05-25
+notes,"manufacturer name Pilot Cell Supplier battery category industrial production date 2026-04-10 chemistry LFP carbon footprint 42.4 kgco2e recycled content 18 percent safety certificate CERT-DEMO-001 expires 2027-05-25"
