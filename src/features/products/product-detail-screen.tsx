@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Download, RotateCcw, X } from "lucide-react";
+import { Check, Download, RotateCcw, Send, X } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -22,8 +22,50 @@ function qualityList(value: unknown) {
   return value.map((item) => String(item)).join(", ");
 }
 
+function qualityValue(summary: unknown, key: string) {
+  if (!summary || typeof summary !== "object") return 0;
+  return Number((summary as Record<string, unknown>)[key] ?? 0);
+}
+
+const blockerOrder: Record<string, number> = {
+  conflicting: 0,
+  expired: 1,
+  low_confidence: 2,
+  missing: 3,
+  accepted: 4,
+};
+
+function sortedInboxRows(rows: Array<Record<string, unknown>>) {
+  return [...rows].sort((left, right) => {
+    const leftStatus = String(left.status ?? "");
+    const rightStatus = String(right.status ?? "");
+    return (
+      (blockerOrder[leftStatus] ?? 10) - (blockerOrder[rightStatus] ?? 10) ||
+      String(left.fieldKey ?? "").localeCompare(String(right.fieldKey ?? ""))
+    );
+  });
+}
+
+function sourceDetails(value: unknown) {
+  if (!value || typeof value !== "object") return [];
+  const ref = value as Record<string, unknown>;
+  return [
+    ref.documentId ? `Document ${String(ref.documentId).slice(0, 8)}` : "",
+    ref.page ? `Page ${String(ref.page)}` : "",
+    ref.sheet ? `Sheet ${String(ref.sheet)}` : "",
+    ref.row ? `Row ${String(ref.row)}` : "",
+    ref.cell ? `Cell ${String(ref.cell)}` : "",
+  ].filter(Boolean);
+}
+
+function sourceSnippet(value: unknown) {
+  if (!value || typeof value !== "object") return "";
+  return String((value as Record<string, unknown>).snippet ?? "");
+}
+
 export function ProductDetailScreen({ productId }: Props) {
   const [tab, setTab] = useState("inbox");
+  const [correctionReason, setCorrectionReason] = useState("");
   const queryClient = useQueryClient();
   const readiness = useQuery({
     queryKey: ["product", productId, "readiness"],
@@ -41,6 +83,11 @@ export function ProductDetailScreen({ productId }: Props) {
   const audit = useQuery({
     queryKey: ["product", productId, "audit"],
     queryFn: () => apiFetch<unknown>(`/products/${productId}/audit-events`),
+  });
+  const requests = useQuery({
+    queryKey: ["product", productId, "requests"],
+    queryFn: () =>
+      apiFetch<unknown>(`/products/${productId}/evidence-requests`),
   });
   const snapshot = useMutation({
     mutationFn: () =>
@@ -67,10 +114,34 @@ export function ProductDetailScreen({ productId }: Props) {
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["product", productId] }),
   });
+  const correction = useMutation({
+    mutationFn: (requestId: string) =>
+      apiFetch(`/evidence-requests/${requestId}/request-correction`, {
+        method: "POST",
+        body: {
+          reason:
+            correctionReason.trim() ||
+            "Please correct the highlighted evidence blockers.",
+          reissue_invite: true,
+        },
+      }),
+    onSuccess: () => {
+      setCorrectionReason("");
+      queryClient.invalidateQueries({ queryKey: ["product", productId] });
+    },
+  });
 
-  const inboxRows = toArray<Record<string, unknown>>(inbox.data);
+  const inboxRows = sortedInboxRows(
+    toArray<Record<string, unknown>>(inbox.data),
+  );
   const historyRows = toArray<Record<string, unknown>>(history.data);
   const auditRows = toArray<Record<string, unknown>>(audit.data);
+  const requestRows = toArray<Record<string, unknown>>(requests.data);
+  const activeRequest = requestRows.find((request) =>
+    ["open", "correction_requested"].includes(String(request.status ?? "open")),
+  );
+  const activeRequestId = String(activeRequest?.id ?? "");
+  const qualitySummary = readiness.data?.qualitySummary;
 
   return (
     <>
@@ -103,15 +174,33 @@ export function ProductDetailScreen({ productId }: Props) {
                 </div>
               </div>
               <div className="rounded-md bg-slate-50 p-2">
-                <div className="text-xs text-slate-500">Overrides</div>
+                <div className="text-xs text-slate-500">Accepted</div>
                 <div className="font-medium">
-                  {String(
-                    (
-                      readiness.data?.qualitySummary as
-                        | Record<string, unknown>
-                        | undefined
-                    )?.overrides ?? 0,
-                  )}
+                  {String(qualityValue(qualitySummary, "acceptedValid"))}
+                </div>
+              </div>
+              <div className="rounded-md bg-slate-50 p-2">
+                <div className="text-xs text-slate-500">Missing</div>
+                <div className="font-medium">
+                  {String(qualityValue(qualitySummary, "missing"))}
+                </div>
+              </div>
+              <div className="rounded-md bg-slate-50 p-2">
+                <div className="text-xs text-slate-500">Conflicts</div>
+                <div className="font-medium">
+                  {String(qualityValue(qualitySummary, "conflicting"))}
+                </div>
+              </div>
+              <div className="rounded-md bg-slate-50 p-2">
+                <div className="text-xs text-slate-500">Expired</div>
+                <div className="font-medium">
+                  {String(qualityValue(qualitySummary, "expired"))}
+                </div>
+              </div>
+              <div className="rounded-md bg-slate-50 p-2">
+                <div className="text-xs text-slate-500">Low confidence</div>
+                <div className="font-medium">
+                  {String(qualityValue(qualitySummary, "lowConfidence"))}
                 </div>
               </div>
             </div>
@@ -180,11 +269,16 @@ export function ProductDetailScreen({ productId }: Props) {
               <div className="space-y-3">
                 {inboxRows.map((row, index) => {
                   const candidate = (
-                    Array.isArray(row.candidates) ? row.candidates[0] : row
+                    Array.isArray(row.candidates) && row.candidates[0]
+                      ? row.candidates[0]
+                      : row
                   ) as Record<string, unknown>;
                   const fieldId = String(
                     candidate.id ?? row.extractedFieldId ?? row.id ?? "",
                   );
+                  const sourceRef = candidate.sourceRef ?? row.sourceRef;
+                  const source = sourceDetails(sourceRef);
+                  const snippet = sourceSnippet(sourceRef);
                   return (
                     <div
                       key={fieldId || index}
@@ -200,6 +294,18 @@ export function ProductDetailScreen({ productId }: Props) {
                           <div className="mt-1 text-sm text-slate-600">
                             {String(candidate.value ?? row.value ?? "No value")}
                           </div>
+                          {source.length > 0 || snippet ? (
+                            <div className="mt-2 rounded-md bg-slate-50 p-2 text-xs text-slate-600">
+                              {source.length > 0 ? (
+                                <div className="font-medium text-slate-700">
+                                  {source.join(" · ")}
+                                </div>
+                              ) : null}
+                              {snippet ? (
+                                <div className="mt-1">{snippet}</div>
+                              ) : null}
+                            </div>
+                          ) : null}
                           <div className="mt-2 flex flex-wrap gap-2">
                             <Badge
                               value={
@@ -325,18 +431,33 @@ export function ProductDetailScreen({ productId }: Props) {
       ) : null}
       <Card className="mt-4">
         <CardHeader>
-          <CardTitle>Manual correction note</CardTitle>
+          <CardTitle>Request supplier correction</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-2 md:grid-cols-[1fr_220px]">
           <div>
             <Label htmlFor="correction">Correction reason</Label>
             <Textarea
               id="correction"
+              value={correctionReason}
               placeholder="Describe what the supplier needs to fix."
+              onChange={(event) => setCorrectionReason(event.target.value)}
             />
+            {!activeRequestId ? (
+              <p className="mt-2 text-xs text-slate-500">
+                Create an evidence request for this product before asking a
+                supplier for corrections.
+              </p>
+            ) : null}
+            {correction.isError ? <ErrorNote error={correction.error} /> : null}
           </div>
-          <Button className="mt-5" variant="secondary" disabled>
-            Correction is request-scoped
+          <Button
+            className="mt-5"
+            variant="secondary"
+            disabled={!activeRequestId || correction.isPending}
+            onClick={() => correction.mutate(activeRequestId)}
+          >
+            <Send className="size-4" />
+            Request correction
           </Button>
         </CardContent>
       </Card>

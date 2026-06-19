@@ -15,6 +15,8 @@ import { formatDateTime, toArray } from "@/lib/utils/format";
 
 export function SupplierSubmissionScreen({ token }: { token: string }) {
   const [file, setFile] = useState<File | null>(null);
+  const [uploadedNotice, setUploadedNotice] = useState("");
+  const [completedNotice, setCompletedNotice] = useState("");
   const queryClient = useQueryClient();
   const context = useQuery({
     queryKey: ["supplier-submission", token],
@@ -43,10 +45,14 @@ export function SupplierSubmissionScreen({ token }: { token: string }) {
         auth: false,
       });
     },
-    onSuccess: () =>
+    onSuccess: () => {
+      setUploadedNotice("Document uploaded. We will process it for the buyer.");
+      setCompletedNotice("");
+      setFile(null);
       queryClient.invalidateQueries({
         queryKey: ["supplier-submission", token, "documents"],
-      }),
+      });
+    },
   });
   const complete = useMutation({
     mutationFn: () =>
@@ -55,10 +61,12 @@ export function SupplierSubmissionScreen({ token }: { token: string }) {
         body: {},
         auth: false,
       }),
-    onSuccess: () =>
+    onSuccess: () => {
+      setCompletedNotice("Submission completed. The buyer can now review it.");
       queryClient.invalidateQueries({
         queryKey: ["supplier-submission", token],
-      }),
+      });
+    },
   });
 
   const product = context.data?.product as Record<string, unknown> | undefined;
@@ -68,16 +76,21 @@ export function SupplierSubmissionScreen({ token }: { token: string }) {
   const request = context.data?.evidenceRequest as
     | Record<string, unknown>
     | undefined;
+  const requestedFields = Array.isArray(request?.requestedFieldKeys)
+    ? request.requestedFieldKeys.map((item) => String(item))
+    : Array.isArray(context.data?.requestedFieldKeys)
+      ? context.data.requestedFieldKeys.map((item) => String(item))
+      : [];
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-6">
       <div className="mx-auto max-w-5xl">
         <div className="mb-5">
           <h1 className="text-xl font-semibold text-slate-950">
-            Supplier Evidence Submission
+            Supplier Evidence Upload
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Upload requested documents and complete the submission when ready.
+            Upload the requested product evidence. No account is needed.
           </p>
         </div>
         {context.isError ? <ErrorNote error={context.error} /> : null}
@@ -113,9 +126,15 @@ export function SupplierSubmissionScreen({ token }: { token: string }) {
                 </div>
               </div>
               <div>
-                <div className="text-xs text-slate-500">
-                  Accepted file types
+                <div className="text-xs text-slate-500">Requested evidence</div>
+                <div>
+                  {requestedFields.length > 0
+                    ? requestedFields.join(", ")
+                    : "Battery Passport readiness documents"}
                 </div>
+              </div>
+              <div>
+                <div className="text-xs text-slate-500">Accepted files</div>
                 <div>
                   {Array.isArray(context.data?.acceptedFileTypes)
                     ? context.data?.acceptedFileTypes.join(", ")
@@ -138,8 +157,9 @@ export function SupplierSubmissionScreen({ token }: { token: string }) {
             </CardHeader>
             <CardContent className="space-y-3">
               <div>
-                <Label>Document</Label>
+                <Label htmlFor="supplier-document">Document</Label>
                 <Input
+                  id="supplier-document"
                   type="file"
                   accept=".pdf,.xlsx,.csv"
                   onChange={(event) => setFile(event.target.files?.[0] ?? null)}
@@ -147,6 +167,16 @@ export function SupplierSubmissionScreen({ token }: { token: string }) {
               </div>
               {upload.isError ? <ErrorNote error={upload.error} /> : null}
               {complete.isError ? <ErrorNote error={complete.error} /> : null}
+              {uploadedNotice ? (
+                <div className="rounded-md border border-green-200 bg-green-50 p-2 text-sm text-green-900">
+                  {uploadedNotice}
+                </div>
+              ) : null}
+              {completedNotice ? (
+                <div className="rounded-md border border-green-200 bg-green-50 p-2 text-sm text-green-900">
+                  {completedNotice}
+                </div>
+              ) : null}
               <Button
                 className="w-full"
                 onClick={() => upload.mutate()}
@@ -169,7 +199,7 @@ export function SupplierSubmissionScreen({ token }: { token: string }) {
         </div>
         <Card className="mt-4">
           <CardHeader>
-            <CardTitle>Uploaded documents</CardTitle>
+            <CardTitle>Documents shared with buyer</CardTitle>
           </CardHeader>
           <CardContent>
             {documents.isError ? <ErrorNote error={documents.error} /> : null}
@@ -178,7 +208,6 @@ export function SupplierSubmissionScreen({ token }: { token: string }) {
                 <tr>
                   <TH>Name</TH>
                   <TH>Status</TH>
-                  <TH>Pack</TH>
                   <TH>Uploaded</TH>
                 </tr>
               </THead>
@@ -192,7 +221,6 @@ export function SupplierSubmissionScreen({ token }: { token: string }) {
                         tone={statusTone(row.status)}
                       />
                     </TCell>
-                    <TCell>{String(row.packKey ?? "")}</TCell>
                     <TCell>
                       {formatDateTime(row.createdAt ?? row.uploadedAt)}
                     </TCell>

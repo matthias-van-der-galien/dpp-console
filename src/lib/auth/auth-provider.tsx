@@ -40,9 +40,11 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [token, setToken] = useState<string | null>(null);
+  const [hasLoadedStoredToken, setHasLoadedStoredToken] = useState(false);
 
   useEffect(() => {
     setToken(getStoredToken());
+    setHasLoadedStoredToken(true);
   }, []);
 
   const meQuery = useQuery({
@@ -72,7 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       token,
       me: (meQuery.data as AuthMe | undefined) ?? null,
       isAuthenticated: Boolean(token && meQuery.data),
-      isLoading: Boolean(token && meQuery.isLoading),
+      isLoading: !hasLoadedStoredToken || Boolean(token && meQuery.isLoading),
       login: loginMutation.mutateAsync,
       logout: () => {
         clearStoredToken();
@@ -81,6 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
     }),
     [
+      hasLoadedStoredToken,
       loginMutation.mutateAsync,
       meQuery.data,
       meQuery.isLoading,
