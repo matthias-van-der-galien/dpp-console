@@ -2,10 +2,23 @@ import { type HTMLAttributes } from "react";
 
 import { cn } from "@/lib/utils/cn";
 
-export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
+type CardVariant = "default" | "subtle" | "flat" | "section";
+
+export function Card({
+  className,
+  variant = "default",
+  ...props
+}: HTMLAttributes<HTMLDivElement> & { variant?: CardVariant }) {
   return (
     <div
-      className={cn("rounded-lg border border-slate-200 bg-white", className)}
+      className={cn(
+        "rounded-lg bg-white",
+        variant === "default" && "border border-slate-200",
+        variant === "subtle" && "border border-slate-100 bg-slate-50/60",
+        variant === "flat" && "border border-transparent bg-transparent",
+        variant === "section" && "border border-slate-200 shadow-sm",
+        className,
+      )}
       {...props}
     />
   );
@@ -13,11 +26,16 @@ export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
 
 export function CardHeader({
   className,
+  divider = true,
   ...props
-}: HTMLAttributes<HTMLDivElement>) {
+}: HTMLAttributes<HTMLDivElement> & { divider?: boolean }) {
   return (
     <div
-      className={cn("border-b border-slate-200 px-4 py-3", className)}
+      className={cn(
+        "px-4 py-3",
+        divider && "border-b border-slate-200",
+        className,
+      )}
       {...props}
     />
   );

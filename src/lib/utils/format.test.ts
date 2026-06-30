@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  evidenceLabel,
+  formatBytes,
   formatDate,
   formatPercent,
+  humanizeKey,
   titleize,
   toArray,
 } from "@/lib/utils/format";
@@ -15,6 +18,15 @@ describe("format utilities", () => {
 
   it("normalizes labels", () => {
     expect(titleize("due_soon")).toBe("Due Soon");
+    expect(humanizeKey("manufacturer_name")).toBe("Manufacturer Name");
+    expect(evidenceLabel({ fieldKey: "recycled_content" })).toBe(
+      "Recycled Content",
+    );
+  });
+
+  it("formats upload sizes", () => {
+    expect(formatBytes(10_000_000)).toBe("9.5 MB");
+    expect(formatBytes(undefined)).toBe("Configured by buyer");
   });
 
   it("supports array and paginated responses", () => {
