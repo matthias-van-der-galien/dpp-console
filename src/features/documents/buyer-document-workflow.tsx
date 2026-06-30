@@ -9,8 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ErrorNote } from "@/components/ui/error-note";
 import { Input, Label, Select } from "@/components/ui/field";
-import { Badge, statusTone } from "@/components/ui/status";
-import { TCell, TH, THead, Table } from "@/components/ui/table";
+import { StatusText, statusTone } from "@/components/ui/status";
+import { InlineState, RecordList, RecordRow } from "@/components/ui/structured";
 import { apiFetch, buildQuery } from "@/lib/api/client";
 import { formatDateTime, toArray } from "@/lib/utils/format";
 
@@ -101,27 +101,30 @@ function DocumentRow({
   const documentId = String(document.id ?? "");
   const failureReason = String(document.failureReason ?? "");
 
+  const extraction =
+    status === "processed" ? (
+      <EvidenceCandidateCount documentId={documentId} />
+    ) : status === "failed" ? (
+      <span className="text-sm text-red-700">
+        {failureReason || "Extraction failed"}
+      </span>
+    ) : (
+      <span className="text-sm text-slate-500">Waiting for extraction</span>
+    );
+
   return (
-    <tr>
-      <TCell>{documentName(document)}</TCell>
-      <TCell>
-        <Badge value={status} tone={statusTone(status)} />
-      </TCell>
-      <TCell>{String(document.packKey ?? "")}</TCell>
-      <TCell>{formatDateTime(document.createdAt ?? document.uploadedAt)}</TCell>
-      <TCell>
-        {status === "processed" ? (
-          <EvidenceCandidateCount documentId={documentId} />
-        ) : status === "failed" ? (
-          <span className="text-sm text-red-700">
-            {failureReason || "Extraction failed"}
-          </span>
-        ) : (
-          <span className="text-sm text-slate-500">Waiting for extraction</span>
-        )}
-      </TCell>
-      <TCell>
-        {status === "failed" ? (
+    <RecordRow
+      title={documentName(document)}
+      description={formatDateTime(document.createdAt ?? document.uploadedAt)}
+      meta={
+        <>
+          <StatusText value={status} tone={statusTone(status)} />
+          {document.packKey ? <span>{String(document.packKey)}</span> : null}
+          {extraction}
+        </>
+      }
+      action={
+        status === "failed" ? (
           <Button
             variant="secondary"
             onClick={() => retry.mutate(documentId)}
@@ -143,9 +146,9 @@ function DocumentRow({
             <Clock className="size-4" />
             Processing
           </span>
-        )}
-      </TCell>
-    </tr>
+        )
+      }
+    />
   );
 }
 
@@ -220,7 +223,7 @@ export function BuyerDocumentWorkflow({
       <CardContent className="space-y-4">
         <p className="text-sm text-slate-500">{description}</p>
         {products.length === 0 ? (
-          <p className="text-sm text-slate-500">{emptyState}</p>
+          <InlineState title={emptyState} />
         ) : (
           <>
             <div className="grid gap-3 xl:grid-cols-[1fr_1fr_1fr_auto]">
@@ -283,42 +286,25 @@ export function BuyerDocumentWorkflow({
                 Upload and extract
               </Button>
             </div>
-            {notice ? (
-              <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-900">
-                {notice}
-              </div>
-            ) : null}
+            {notice ? <InlineState title={notice} tone="success" /> : null}
             {upload.isError ? <ErrorNote error={upload.error} /> : null}
             {documents.isError ? <ErrorNote error={documents.error} /> : null}
             {selectedProductId && documentRows.length === 0 ? (
-              <p className="text-sm text-slate-500">
-                No documents uploaded for this product yet.
-              </p>
+              <InlineState
+                title="No documents uploaded yet."
+                detail="Upload the first supplier document to start extraction."
+              />
             ) : null}
             {documentRows.length > 0 ? (
-              <div className="overflow-x-auto">
-                <Table>
-                  <THead>
-                    <tr>
-                      <TH>Name</TH>
-                      <TH>Status</TH>
-                      <TH>Pack</TH>
-                      <TH>Uploaded</TH>
-                      <TH>Extraction</TH>
-                      <TH>Next</TH>
-                    </tr>
-                  </THead>
-                  <tbody>
-                    {documentRows.map((document) => (
-                      <DocumentRow
-                        key={String(document.id)}
-                        document={document}
-                        productId={selectedProductId}
-                      />
-                    ))}
-                  </tbody>
-                </Table>
-              </div>
+              <RecordList>
+                {documentRows.map((document) => (
+                  <DocumentRow
+                    key={String(document.id)}
+                    document={document}
+                    productId={selectedProductId}
+                  />
+                ))}
+              </RecordList>
             ) : null}
           </>
         )}

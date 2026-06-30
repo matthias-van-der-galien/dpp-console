@@ -16,7 +16,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ErrorNote } from "@/components/ui/error-note";
 import { Input, Label } from "@/components/ui/field";
-import { Badge, ReadinessBar } from "@/components/ui/status";
+import { Badge, MetricStrip, ReadinessBar } from "@/components/ui/status";
+import { InlineState } from "@/components/ui/structured";
 import { TCell, TH, THead, Table } from "@/components/ui/table";
 import { BuyerDocumentWorkflow } from "@/features/documents/buyer-document-workflow";
 import { PageHeading } from "@/features/common/page-heading";
@@ -150,7 +151,7 @@ function ReadinessPilotSummary({ productId }: { productId: string }) {
             Review product
           </Link>
         </div>
-        <div className="grid gap-3 md:grid-cols-[160px_1fr]">
+        <div className="grid gap-4 md:grid-cols-[180px_1fr]">
           <div className="rounded-md bg-slate-50 p-3">
             <div className="text-xs font-medium text-slate-500">
               Readiness score
@@ -159,38 +160,35 @@ function ReadinessPilotSummary({ productId }: { productId: string }) {
               <ReadinessBar value={score} />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-5">
-            <div className="rounded-md bg-slate-50 p-2">
-              <div className="text-xs text-slate-500">Accepted</div>
-              <div className="font-medium">
-                {String(qualityValue(qualitySummary, "acceptedValid"))}
-              </div>
-            </div>
-            <div className="rounded-md bg-slate-50 p-2">
-              <div className="text-xs text-slate-500">Missing</div>
-              <div className="font-medium">
-                {String(qualityValue(qualitySummary, "missing"))}
-              </div>
-            </div>
-            <div className="rounded-md bg-slate-50 p-2">
-              <div className="text-xs text-slate-500">Conflicts</div>
-              <div className="font-medium">
-                {String(qualityValue(qualitySummary, "conflicting"))}
-              </div>
-            </div>
-            <div className="rounded-md bg-slate-50 p-2">
-              <div className="text-xs text-slate-500">Expired</div>
-              <div className="font-medium">
-                {String(qualityValue(qualitySummary, "expired"))}
-              </div>
-            </div>
-            <div className="rounded-md bg-slate-50 p-2">
-              <div className="text-xs text-slate-500">Low confidence</div>
-              <div className="font-medium">
-                {String(qualityValue(qualitySummary, "lowConfidence"))}
-              </div>
-            </div>
-          </div>
+          <MetricStrip
+            items={[
+              {
+                label: "Accepted",
+                value: qualityValue(qualitySummary, "acceptedValid"),
+                tone: "good",
+              },
+              {
+                label: "Missing",
+                value: qualityValue(qualitySummary, "missing"),
+                tone: "warn",
+              },
+              {
+                label: "Conflicts",
+                value: qualityValue(qualitySummary, "conflicting"),
+                tone: "bad",
+              },
+              {
+                label: "Expired",
+                value: qualityValue(qualitySummary, "expired"),
+                tone: "warn",
+              },
+              {
+                label: "Low confidence",
+                value: qualityValue(qualitySummary, "lowConfidence"),
+                tone: "warn",
+              },
+            ]}
+          />
         </div>
         {blockers.length > 0 ? (
           <div className="flex flex-wrap gap-2">
@@ -264,13 +262,10 @@ export function ReadinessCheckScreen() {
             <CardTitle>Import product suppliers</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="rounded-md border border-teal-200 bg-teal-50 p-3 text-sm text-teal-950">
-              <div className="font-medium">Expected columns</div>
-              <div className="mt-1 text-teal-900">
-                product_sku, product_name, supplier_name, supplier_external_id,
-                supplier_contact_email, battery_category
-              </div>
-            </div>
+            <InlineState
+              title="Expected columns."
+              detail="product_sku, product_name and supplier_name are required. Contact email and battery category are optional."
+            />
             <div>
               <Label htmlFor="readiness-import">CSV or XLSX file</Label>
               <Input
@@ -332,10 +327,16 @@ export function ReadinessCheckScreen() {
               </div>
             ) : null}
             {result ? (
-              <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-900">
-                <div className="flex items-center gap-2 font-medium">
-                  <CheckCircle className="size-4" />
-                  Imported {String(result.imported ?? rows.length)} rows.
+              <InlineState
+                title={`Imported ${String(result.imported ?? rows.length)} rows.`}
+                tone="success"
+                action={<CheckCircle className="size-4" />}
+              />
+            ) : null}
+            {result && importedProducts.length > 0 ? (
+              <div className="text-sm">
+                <div className="mb-2 font-medium text-slate-700">
+                  Imported products
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {importedProducts.map((product) => (

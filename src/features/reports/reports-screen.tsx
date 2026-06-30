@@ -6,10 +6,10 @@ import { Download, Play, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ErrorNote } from "@/components/ui/error-note";
-import { Badge, ReadinessBar, statusTone } from "@/components/ui/status";
+import { ReadinessBar, StatusText, statusTone } from "@/components/ui/status";
+import { RecordList, RecordRow } from "@/components/ui/structured";
 import { TCell, TH, THead, Table } from "@/components/ui/table";
-import { apiBaseUrl } from "@/lib/api/config";
-import { apiFetch } from "@/lib/api/client";
+import { apiFetch, downloadApiFile } from "@/lib/api/client";
 import { formatDateTime, toArray } from "@/lib/utils/format";
 import { PageHeading } from "@/features/common/page-heading";
 
@@ -65,6 +65,10 @@ export function ReportsScreen() {
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["report-snapshots"] }),
   });
+  const download = useMutation({
+    mutationFn: ({ path, filename }: { path: string; filename: string }) =>
+      downloadApiFile(path, filename),
+  });
 
   return (
     <>
@@ -107,18 +111,30 @@ export function ReportsScreen() {
                     </TCell>
                     <TCell>
                       <div className="flex gap-2">
-                        <a
+                        <button
                           className="text-sm font-medium text-teal-700 hover:underline"
-                          href={`${apiBaseUrl}/report-snapshots/${String(row.id)}/export.json`}
+                          type="button"
+                          onClick={() =>
+                            download.mutate({
+                              path: `/report-snapshots/${String(row.id)}/export.json`,
+                              filename: `report-snapshot-${String(row.id)}.json`,
+                            })
+                          }
                         >
                           JSON
-                        </a>
-                        <a
+                        </button>
+                        <button
                           className="text-sm font-medium text-teal-700 hover:underline"
-                          href={`${apiBaseUrl}/report-snapshots/${String(row.id)}/export.csv`}
+                          type="button"
+                          onClick={() =>
+                            download.mutate({
+                              path: `/report-snapshots/${String(row.id)}/export.csv`,
+                              filename: `report-snapshot-${String(row.id)}.csv`,
+                            })
+                          }
                         >
                           CSV
-                        </a>
+                        </button>
                       </div>
                     </TCell>
                   </tr>
@@ -174,6 +190,9 @@ function ReportCard({
     queryKey: ["report", report.key],
     queryFn: () => apiFetch<unknown>(report.path),
   });
+  const download = useMutation({
+    mutationFn: () => downloadApiFile(report.csv, `${report.key}-report.csv`),
+  });
   const rows = toArray<Record<string, unknown>>(query.data);
   return (
     <Card>
@@ -187,57 +206,42 @@ function ReportCard({
             <Save className="size-4" />
             Snapshot
           </Button>
-          <a
-            className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium"
-            href={`${apiBaseUrl}${report.csv}`}
+          <Button
+            variant="secondary"
+            onClick={() => download.mutate()}
+            disabled={download.isPending}
           >
             <Download className="size-4" />
             CSV
-          </a>
+          </Button>
         </div>
+        {download.isError ? <ErrorNote error={download.error} /> : null}
         <div className="max-h-80 overflow-auto">
-          <Table>
-            <THead>
-              <tr>
-                <TH>Name</TH>
-                <TH>Status</TH>
-                <TH>Score</TH>
-              </tr>
-            </THead>
-            <tbody>
-              {rows.slice(0, 8).map((row, index) => (
-                <tr key={String(row.id ?? index)}>
-                  <TCell>
-                    {String(
-                      row.productName ??
-                        row.supplierName ??
-                        row.fieldKey ??
-                        row.name ??
-                        "row",
-                    )}
-                  </TCell>
-                  <TCell>
-                    <Badge
-                      value={
-                        row.status ??
-                        row.slaStatus ??
-                        row.validationStatus ??
-                        "live"
-                      }
-                      tone={statusTone(
-                        row.status ?? row.slaStatus ?? row.validationStatus,
-                      )}
-                    />
-                  </TCell>
-                  <TCell>
+          <RecordList>
+            {rows.slice(0, 8).map((row, index) => {
+              const name = String(
+                row.productName ??
+                  row.supplierName ??
+                  row.fieldKey ??
+                  row.name ??
+                  "row",
+              );
+              const status =
+                row.status ?? row.slaStatus ?? row.validationStatus ?? "live";
+              return (
+                <RecordRow
+                  key={String(row.id ?? index)}
+                  title={name}
+                  meta={<StatusText value={status} tone={statusTone(status)} />}
+                  action={
                     <ReadinessBar
                       value={row.readinessScore ?? row.averageReadiness ?? 0}
                     />
-                  </TCell>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
+                  }
+                />
+              );
+            })}
+          </RecordList>
         </div>
       </CardContent>
     </Card>
