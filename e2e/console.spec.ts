@@ -240,6 +240,7 @@ async function mockCoreApi(page: Page) {
         json: {
           id: "invite-1",
           uploadUrl: "http://localhost:3001/supplier-submissions/test-token",
+          expiresAt: "2026-07-14T00:00:00.000Z",
         },
       });
     },
@@ -321,20 +322,21 @@ async function login(page: Page) {
   await page.getByLabel("Bearer token").fill("dev-token");
   await page.getByRole("button", { name: "Validate and enter" }).click();
   await expect(
-    page.getByRole("heading", { name: "Workspace Overview" }),
+    page.getByRole("heading", { name: "Battery Passport Readiness Check" }),
   ).toBeVisible();
 }
 
-test("login loads operational overview", async ({ page }) => {
+test("login lands on readiness buyer home", async ({ page }) => {
   await page.goto("/login");
   await page.getByLabel("Bearer token").fill("dev-token");
   await page.getByRole("button", { name: "Validate and enter" }).click();
 
   await expect(
-    page.getByRole("heading", { name: "Workspace Overview" }),
+    page.getByRole("heading", { name: "Battery Passport Readiness Check" }),
   ).toBeVisible();
   await expect(page.getByText("Demo Workspace")).toBeVisible();
-  await expect(page.getByText("88%")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Readiness" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Overview" })).toHaveCount(0);
 });
 
 test("readiness check previews valid CSV and commits import", async ({
@@ -618,12 +620,17 @@ test("request composer creates request and supplier invite", async ({
   await page.goto("/evidence-requests");
   await page.getByLabel("Product").selectOption("product-1");
   await page.getByLabel("Supplier").selectOption("supplier-1");
-  await page.getByLabel("Additional field keys").fill("carbon_footprint");
+  await page.getByText("Advanced: add technical evidence keys").click();
+  await page.getByLabel("Technical evidence keys").fill("carbon_footprint");
   await page
     .getByRole("button", { name: "Create request and invite supplier" })
     .click();
 
-  await expect(page.getByText("supplier-submissions/test-token")).toBeVisible();
+  await expect(page.getByText("Supplier link is ready")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Copy link" })).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Open supplier page" }),
+  ).toBeVisible();
 });
 
 test("product detail prioritizes blockers and accepts evidence", async ({
@@ -634,7 +641,7 @@ test("product detail prioritizes blockers and accepts evidence", async ({
 
   await expect(page.getByText("Conflicts")).toBeVisible();
   await expect(page.getByText("Manufacturer: Cell Supplier Ltd")).toBeVisible();
-  await page.getByRole("button", { name: "Accept" }).first().click();
+  await page.getByRole("button", { name: "Accept value" }).first().click();
   await page
     .getByLabel("Correction reason")
     .fill("Please send a current cert.");
@@ -650,9 +657,8 @@ test("supplier token page uploads and completes without bearer auth", async ({
     page.getByRole("heading", { name: "Supplier Evidence Upload" }),
   ).toBeVisible();
   await expect(page.getByText("Battery Module A")).toBeVisible();
-  await expect(
-    page.getByText("manufacturer_name, recycled_content"),
-  ).toBeVisible();
+  await expect(page.getByText("Manufacturer Name")).toBeVisible();
+  await expect(page.getByText("Recycled Content")).toBeVisible();
   await page.getByLabel("Document").setInputFiles({
     name: "evidence.pdf",
     mimeType: "application/pdf",
