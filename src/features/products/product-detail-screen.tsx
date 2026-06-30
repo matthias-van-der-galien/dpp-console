@@ -8,11 +8,17 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ErrorNote } from "@/components/ui/error-note";
 import { Label, Textarea } from "@/components/ui/field";
-import { Badge, ReadinessBar, statusTone } from "@/components/ui/status";
+import {
+  Badge,
+  MetricStrip,
+  ReadinessBar,
+  StatusText,
+  statusTone,
+} from "@/components/ui/status";
+import { RecordList, RecordRow } from "@/components/ui/structured";
 import { TCell, TH, THead, Table } from "@/components/ui/table";
-import { apiBaseUrl } from "@/lib/api/config";
-import { apiFetch } from "@/lib/api/client";
-import { formatDateTime, toArray } from "@/lib/utils/format";
+import { apiFetch, downloadApiFile } from "@/lib/api/client";
+import { evidenceLabel, formatDateTime, toArray } from "@/lib/utils/format";
 import { PageHeading } from "@/features/common/page-heading";
 
 type Props = { productId: string };
@@ -66,6 +72,8 @@ function sourceSnippet(value: unknown) {
 export function ProductDetailScreen({ productId }: Props) {
   const [tab, setTab] = useState("inbox");
   const [correctionReason, setCorrectionReason] = useState("");
+  const [rejectingFieldId, setRejectingFieldId] = useState("");
+  const [rejectReason, setRejectReason] = useState("");
   const queryClient = useQueryClient();
   const readiness = useQuery({
     queryKey: ["product", productId, "readiness"],
@@ -96,6 +104,10 @@ export function ProductDetailScreen({ productId }: Props) {
         body: {},
       }),
   });
+  const download = useMutation({
+    mutationFn: ({ path, filename }: { path: string; filename: string }) =>
+      downloadApiFile(path, filename),
+  });
   const accept = useMutation({
     mutationFn: (fieldId: string) =>
       apiFetch(`/extracted-fields/${fieldId}/accept`, {
@@ -111,8 +123,11 @@ export function ProductDetailScreen({ productId }: Props) {
         method: "POST",
         body: { reason },
       }),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["product", productId] }),
+    onSuccess: () => {
+      setRejectingFieldId("");
+      setRejectReason("");
+      queryClient.invalidateQueries({ queryKey: ["product", productId] });
+    },
   });
   const correction = useMutation({
     mutationFn: (requestId: string) =>
@@ -159,51 +174,46 @@ export function ProductDetailScreen({ productId }: Props) {
             <ReadinessBar
               value={readiness.data?.readinessScore ?? readiness.data?.score}
             />
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div className="rounded-md bg-slate-50 p-2">
-                <div className="text-xs text-slate-500">Pack</div>
-                <div className="font-medium">
-                  {String(
-                    readiness.data?.packKey ??
-                      (readiness.data?.pack &&
-                      typeof readiness.data.pack === "object"
-                        ? (readiness.data.pack as Record<string, unknown>).key
-                        : undefined) ??
-                      "default",
-                  )}
-                </div>
-              </div>
-              <div className="rounded-md bg-slate-50 p-2">
-                <div className="text-xs text-slate-500">Accepted</div>
-                <div className="font-medium">
-                  {String(qualityValue(qualitySummary, "acceptedValid"))}
-                </div>
-              </div>
-              <div className="rounded-md bg-slate-50 p-2">
-                <div className="text-xs text-slate-500">Missing</div>
-                <div className="font-medium">
-                  {String(qualityValue(qualitySummary, "missing"))}
-                </div>
-              </div>
-              <div className="rounded-md bg-slate-50 p-2">
-                <div className="text-xs text-slate-500">Conflicts</div>
-                <div className="font-medium">
-                  {String(qualityValue(qualitySummary, "conflicting"))}
-                </div>
-              </div>
-              <div className="rounded-md bg-slate-50 p-2">
-                <div className="text-xs text-slate-500">Expired</div>
-                <div className="font-medium">
-                  {String(qualityValue(qualitySummary, "expired"))}
-                </div>
-              </div>
-              <div className="rounded-md bg-slate-50 p-2">
-                <div className="text-xs text-slate-500">Low confidence</div>
-                <div className="font-medium">
-                  {String(qualityValue(qualitySummary, "lowConfidence"))}
-                </div>
-              </div>
+            <div className="text-sm text-slate-600">
+              Pack:{" "}
+              {String(
+                readiness.data?.packKey ??
+                  (readiness.data?.pack &&
+                  typeof readiness.data.pack === "object"
+                    ? (readiness.data.pack as Record<string, unknown>).key
+                    : undefined) ??
+                  "default",
+              )}
             </div>
+            <MetricStrip
+              items={[
+                {
+                  label: "Accepted",
+                  value: qualityValue(qualitySummary, "acceptedValid"),
+                  tone: "good",
+                },
+                {
+                  label: "Missing",
+                  value: qualityValue(qualitySummary, "missing"),
+                  tone: "warn",
+                },
+                {
+                  label: "Conflicts",
+                  value: qualityValue(qualitySummary, "conflicting"),
+                  tone: "bad",
+                },
+                {
+                  label: "Expired",
+                  value: qualityValue(qualitySummary, "expired"),
+                  tone: "warn",
+                },
+                {
+                  label: "Low confidence",
+                  value: qualityValue(qualitySummary, "lowConfidence"),
+                  tone: "warn",
+                },
+              ]}
+            />
           </CardContent>
         </Card>
         <Card>
@@ -218,27 +228,46 @@ export function ProductDetailScreen({ productId }: Props) {
               <RotateCcw className="size-4" />
               Create snapshot
             </Button>
-            <a
-              className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium"
-              href={`${apiBaseUrl}/products/${productId}/export.json`}
+            <Button
+              variant="secondary"
+              onClick={() =>
+                download.mutate({
+                  path: `/products/${productId}/export.json`,
+                  filename: `product-${productId}.json`,
+                })
+              }
+              disabled={download.isPending}
             >
               <Download className="size-4" />
               JSON
-            </a>
-            <a
-              className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium"
-              href={`${apiBaseUrl}/products/${productId}/export.csv`}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() =>
+                download.mutate({
+                  path: `/products/${productId}/export.csv`,
+                  filename: `product-${productId}.csv`,
+                })
+              }
+              disabled={download.isPending}
             >
               <Download className="size-4" />
               CSV
-            </a>
-            <a
-              className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium"
-              href={`${apiBaseUrl}/products/${productId}/audit-pack.zip`}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() =>
+                download.mutate({
+                  path: `/products/${productId}/audit-pack.zip`,
+                  filename: `product-${productId}-audit-pack.zip`,
+                })
+              }
+              disabled={download.isPending}
             >
               <Download className="size-4" />
               Audit ZIP
-            </a>
+            </Button>
+            {download.isError ? <ErrorNote error={download.error} /> : null}
           </CardContent>
         </Card>
       </div>
@@ -266,7 +295,7 @@ export function ProductDetailScreen({ productId }: Props) {
               </p>
             ) : null}
             {inboxRows.length > 0 ? (
-              <div className="space-y-3">
+              <RecordList>
                 {inboxRows.map((row, index) => {
                   const candidate = (
                     Array.isArray(row.candidates) && row.candidates[0]
@@ -279,85 +308,126 @@ export function ProductDetailScreen({ productId }: Props) {
                   const sourceRef = candidate.sourceRef ?? row.sourceRef;
                   const source = sourceDetails(sourceRef);
                   const snippet = sourceSnippet(sourceRef);
+                  const requirement = evidenceLabel({
+                    ...row,
+                    ...candidate,
+                  });
+                  const status = row.status ?? candidate.status ?? "candidate";
+                  const validation =
+                    row.validationStatus ??
+                    candidate.validationStatus ??
+                    "unknown";
                   return (
-                    <div
+                    <RecordRow
                       key={fieldId || index}
-                      className="rounded-lg border border-slate-200 p-3"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <div className="font-medium text-slate-950">
-                            {String(
-                              row.fieldKey ?? candidate.fieldKey ?? "field",
-                            )}
-                          </div>
-                          <div className="mt-1 text-sm text-slate-600">
+                      title={requirement}
+                      description={
+                        <span>
+                          <span className="font-medium text-slate-900">
                             {String(candidate.value ?? row.value ?? "No value")}
+                          </span>
+                          {source.length > 0 ? (
+                            <span className="ml-2 text-xs text-slate-500">
+                              {source.join(" · ")}
+                            </span>
+                          ) : null}
+                          {snippet ? (
+                            <span className="mt-1 block text-xs text-slate-500">
+                              {snippet}
+                            </span>
+                          ) : null}
+                        </span>
+                      }
+                      meta={
+                        <>
+                          <StatusText
+                            value={status}
+                            tone={statusTone(status)}
+                          />
+                          <StatusText
+                            value={validation}
+                            tone={statusTone(validation)}
+                          />
+                          {qualityList(row.qualityFlags) ? (
+                            <span className="text-amber-700">
+                              {qualityList(row.qualityFlags)}
+                            </span>
+                          ) : null}
+                        </>
+                      }
+                      action={
+                        <div className="space-y-2">
+                          <div className="flex gap-2">
+                            <Button
+                              onClick={() => accept.mutate(fieldId)}
+                              disabled={!fieldId || accept.isPending}
+                            >
+                              <Check className="size-4" />
+                              Accept value
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              onClick={() => {
+                                setRejectingFieldId(fieldId);
+                                setRejectReason("");
+                              }}
+                              disabled={!fieldId || reject.isPending}
+                            >
+                              <X className="size-4" />
+                              Reject and ask supplier
+                            </Button>
                           </div>
-                          {source.length > 0 || snippet ? (
-                            <div className="mt-2 rounded-md bg-slate-50 p-2 text-xs text-slate-600">
-                              {source.length > 0 ? (
-                                <div className="font-medium text-slate-700">
-                                  {source.join(" · ")}
-                                </div>
-                              ) : null}
-                              {snippet ? (
-                                <div className="mt-1">{snippet}</div>
-                              ) : null}
+                          {rejectingFieldId === fieldId ? (
+                            <div className="w-80 rounded-md border border-slate-200 bg-slate-50 p-2">
+                              <Label htmlFor={`reject-${fieldId}`}>
+                                Rejection reason
+                              </Label>
+                              <Textarea
+                                id={`reject-${fieldId}`}
+                                className="mt-1 min-h-20"
+                                value={rejectReason}
+                                placeholder="Tell the supplier what is wrong or missing."
+                                onChange={(event) =>
+                                  setRejectReason(event.target.value)
+                                }
+                              />
+                              <div className="mt-2 flex justify-end gap-2">
+                                <Button
+                                  variant="ghost"
+                                  onClick={() => setRejectingFieldId("")}
+                                >
+                                  Cancel
+                                </Button>
+                                <Button
+                                  variant="danger"
+                                  disabled={
+                                    reject.isPending || !rejectReason.trim()
+                                  }
+                                  onClick={() =>
+                                    reject.mutate({
+                                      fieldId,
+                                      reason: rejectReason.trim(),
+                                    })
+                                  }
+                                >
+                                  Reject
+                                </Button>
+                              </div>
                             </div>
                           ) : null}
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            <Badge
-                              value={
-                                row.status ?? candidate.status ?? "candidate"
-                              }
-                              tone={statusTone(row.status ?? candidate.status)}
-                            />
-                            <Badge
-                              value={
-                                row.validationStatus ??
-                                candidate.validationStatus ??
-                                "unknown"
-                              }
-                              tone={statusTone(
-                                row.validationStatus ??
-                                  candidate.validationStatus,
-                              )}
-                            />
-                            {qualityList(row.qualityFlags) ? (
-                              <span className="text-xs text-amber-700">
-                                {qualityList(row.qualityFlags)}
-                              </span>
-                            ) : null}
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button
-                            onClick={() => accept.mutate(fieldId)}
-                            disabled={!fieldId || accept.isPending}
+                          <button
+                            className="text-xs font-medium text-slate-500 underline-offset-2 hover:text-slate-900 hover:underline"
+                            type="button"
+                            disabled
                           >
-                            <Check className="size-4" />
-                            Accept
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            onClick={() =>
-                              reject.mutate({
-                                fieldId,
-                                reason: "Rejected in console review",
-                              })
-                            }
-                            disabled={!fieldId || reject.isPending}
-                          >
-                            <X className="size-4" />
-                            Reject
-                          </Button>
+                            Edit / override
+                          </button>
                         </div>
-                      </div>
-                    </div>
+                      }
+                    />
                   );
                 })}
-              </div>
+              </RecordList>
             ) : null}
           </CardContent>
         </Card>

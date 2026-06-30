@@ -61,6 +61,38 @@ export async function apiFetch<T = unknown>(
   return (await response.text()) as T;
 }
 
+export async function downloadApiFile(path: string, fallbackFilename: string) {
+  const headers = new Headers();
+  const token = getStoredToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  const response = await fetch(`${apiBaseUrl}${path}`, { headers });
+  if (!response.ok) {
+    const contentType = response.headers.get("content-type") ?? "";
+    const envelope = contentType.includes("application/json")
+      ? ((await response.json()) as DppErrorEnvelope)
+      : {
+          error: "download_failed",
+          message: await response.text(),
+          requestId: response.headers.get("x-request-id") ?? "unknown",
+        };
+    throw new DppApiError(response.status, envelope);
+  }
+
+  const blob = await response.blob();
+  const disposition = response.headers.get("content-disposition") ?? "";
+  const filename =
+    disposition.match(/filename="?([^"]+)"?/)?.[1] ?? fallbackFilename;
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(url);
+}
+
 export function buildQuery(
   params: Record<string, string | number | boolean | null | undefined>,
 ) {
