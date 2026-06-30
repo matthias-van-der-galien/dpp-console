@@ -8,10 +8,21 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ErrorNote } from "@/components/ui/error-note";
 import { Input, Label } from "@/components/ui/field";
-import { Badge, statusTone } from "@/components/ui/status";
-import { TCell, TH, THead, Table } from "@/components/ui/table";
+import { Badge, StatusText, statusTone } from "@/components/ui/status";
+import {
+  FieldList,
+  InlineState,
+  RecordList,
+  RecordRow,
+} from "@/components/ui/structured";
 import { apiFetch } from "@/lib/api/client";
-import { formatDateTime, toArray } from "@/lib/utils/format";
+import {
+  evidenceLabel,
+  formatBytes,
+  formatDateTime,
+  humanizeKey,
+  toArray,
+} from "@/lib/utils/format";
 
 export function SupplierSubmissionScreen({ token }: { token: string }) {
   const [file, setFile] = useState<File | null>(null);
@@ -77,10 +88,15 @@ export function SupplierSubmissionScreen({ token }: { token: string }) {
     | Record<string, unknown>
     | undefined;
   const requestedFields = Array.isArray(request?.requestedFieldKeys)
-    ? request.requestedFieldKeys.map((item) => String(item))
+    ? request.requestedFieldKeys.map((item) => humanizeKey(String(item)))
     : Array.isArray(context.data?.requestedFieldKeys)
-      ? context.data.requestedFieldKeys.map((item) => String(item))
+      ? context.data.requestedFieldKeys.map((item) => humanizeKey(String(item)))
       : [];
+  const documentRows = toArray<Record<string, unknown>>(documents.data);
+  const canComplete = documentRows.length > 0;
+  const hasProcessingDocument = documentRows.some((row) =>
+    ["uploaded", "processing"].includes(String(row.status ?? "")),
+  );
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-6">
@@ -99,53 +115,62 @@ export function SupplierSubmissionScreen({ token }: { token: string }) {
             <CardHeader>
               <CardTitle>Request context</CardTitle>
             </CardHeader>
-            <CardContent className="grid gap-3 text-sm md:grid-cols-2">
+            <CardContent className="space-y-4">
+              <FieldList
+                items={[
+                  {
+                    label: "Product",
+                    value: String(product?.name ?? product?.sku ?? "Product"),
+                  },
+                  {
+                    label: "Supplier",
+                    value: String(supplier?.name ?? "Supplier"),
+                  },
+                  {
+                    label: "Status",
+                    value: (
+                      <Badge
+                        value={request?.status ?? "open"}
+                        tone={statusTone(request?.status)}
+                      />
+                    ),
+                  },
+                  {
+                    label: "Due",
+                    value: formatDateTime(
+                      request?.dueAt ?? context.data?.dueAt,
+                    ),
+                  },
+                  {
+                    label: "Accepted files",
+                    value: Array.isArray(context.data?.acceptedFileTypes)
+                      ? context.data?.acceptedFileTypes.join(", ")
+                      : "PDF, XLSX, CSV",
+                  },
+                  {
+                    label: "Max upload",
+                    value: formatBytes(context.data?.maxUploadBytes),
+                  },
+                ]}
+              />
               <div>
-                <div className="text-xs text-slate-500">Product</div>
-                <div className="font-medium">
-                  {String(product?.name ?? product?.sku ?? "Product")}
+                <div className="text-xs font-medium text-slate-500">
+                  Requested evidence
                 </div>
-              </div>
-              <div>
-                <div className="text-xs text-slate-500">Supplier</div>
-                <div className="font-medium">
-                  {String(supplier?.name ?? "Supplier")}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-slate-500">Status</div>
-                <Badge
-                  value={request?.status ?? "open"}
-                  tone={statusTone(request?.status)}
-                />
-              </div>
-              <div>
-                <div className="text-xs text-slate-500">Due</div>
-                <div>
-                  {formatDateTime(request?.dueAt ?? context.data?.dueAt)}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-slate-500">Requested evidence</div>
-                <div>
-                  {requestedFields.length > 0
-                    ? requestedFields.join(", ")
-                    : "Battery Passport readiness documents"}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-slate-500">Accepted files</div>
-                <div>
-                  {Array.isArray(context.data?.acceptedFileTypes)
-                    ? context.data?.acceptedFileTypes.join(", ")
-                    : "PDF, XLSX, CSV"}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-slate-500">Max upload</div>
-                <div>
-                  {String(
-                    context.data?.maxUploadBytes ?? "Configured by buyer",
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {requestedFields.length > 0 ? (
+                    requestedFields.map((field) => (
+                      <span
+                        key={field}
+                        className="rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700"
+                      >
+                        {field}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-sm text-slate-600">
+                      Battery Passport readiness documents
+                    </span>
                   )}
                 </div>
               </div>
@@ -168,15 +193,29 @@ export function SupplierSubmissionScreen({ token }: { token: string }) {
               {upload.isError ? <ErrorNote error={upload.error} /> : null}
               {complete.isError ? <ErrorNote error={complete.error} /> : null}
               {uploadedNotice ? (
-                <div className="rounded-md border border-green-200 bg-green-50 p-2 text-sm text-green-900">
-                  {uploadedNotice}
-                </div>
+                <InlineState title={uploadedNotice} tone="success" />
               ) : null}
               {completedNotice ? (
-                <div className="rounded-md border border-green-200 bg-green-50 p-2 text-sm text-green-900">
-                  {completedNotice}
-                </div>
+                <InlineState title={completedNotice} tone="success" />
               ) : null}
+              {!canComplete ? (
+                <InlineState
+                  title="Upload first."
+                  detail="The buyer needs at least one document before you can complete."
+                />
+              ) : hasProcessingDocument ? (
+                <InlineState
+                  title="Processing."
+                  detail="You can complete now; the buyer will review extracted evidence when ready."
+                  tone="warning"
+                />
+              ) : (
+                <InlineState
+                  title="Ready for buyer review."
+                  detail="Your uploaded documents are available to the buyer."
+                  tone="success"
+                />
+              )}
               <Button
                 className="w-full"
                 onClick={() => upload.mutate()}
@@ -189,7 +228,7 @@ export function SupplierSubmissionScreen({ token }: { token: string }) {
                 className="w-full"
                 variant="secondary"
                 onClick={() => complete.mutate()}
-                disabled={complete.isPending}
+                disabled={!canComplete || complete.isPending}
               >
                 <CheckCircle className="size-4" />
                 Complete submission
@@ -203,31 +242,34 @@ export function SupplierSubmissionScreen({ token }: { token: string }) {
           </CardHeader>
           <CardContent>
             {documents.isError ? <ErrorNote error={documents.error} /> : null}
-            <Table>
-              <THead>
-                <tr>
-                  <TH>Name</TH>
-                  <TH>Status</TH>
-                  <TH>Uploaded</TH>
-                </tr>
-              </THead>
-              <tbody>
-                {toArray<Record<string, unknown>>(documents.data).map((row) => (
-                  <tr key={String(row.id)}>
-                    <TCell>{String(row.filename ?? row.name ?? row.id)}</TCell>
-                    <TCell>
-                      <Badge
-                        value={row.status ?? "uploaded"}
-                        tone={statusTone(row.status)}
-                      />
-                    </TCell>
-                    <TCell>
-                      {formatDateTime(row.createdAt ?? row.uploadedAt)}
-                    </TCell>
-                  </tr>
+            {documentRows.length === 0 ? (
+              <InlineState
+                title="No documents shared yet."
+                detail="Upload a PDF, XLSX or CSV to start."
+              />
+            ) : (
+              <RecordList>
+                {documentRows.map((row) => (
+                  <RecordRow
+                    key={String(row.id)}
+                    title={String(row.filename ?? row.name ?? row.id)}
+                    description={formatDateTime(
+                      row.createdAt ?? row.uploadedAt,
+                    )}
+                    meta={
+                      <>
+                        <StatusText value={row.status ?? "uploaded"} />
+                        {row.packKey ? (
+                          <span>
+                            {evidenceLabel({ fieldKey: row.packKey })}
+                          </span>
+                        ) : null}
+                      </>
+                    }
+                  />
                 ))}
-              </tbody>
-            </Table>
+              </RecordList>
+            )}
           </CardContent>
         </Card>
       </div>
