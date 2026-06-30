@@ -12,11 +12,17 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ErrorNote } from "@/components/ui/error-note";
 import { Input, Label, Select } from "@/components/ui/field";
-import { Badge, statusTone } from "@/components/ui/status";
+import { Badge, StatusText, statusTone } from "@/components/ui/status";
+import { InlineState } from "@/components/ui/structured";
 import { TCell, TH, THead, Table } from "@/components/ui/table";
 import { PageHeading } from "@/features/common/page-heading";
 import { apiFetch } from "@/lib/api/client";
-import { formatDateTime, toArray } from "@/lib/utils/format";
+import {
+  evidenceLabel,
+  formatDateTime,
+  humanizeKey,
+  toArray,
+} from "@/lib/utils/format";
 
 const createSchema = z.object({
   product_id: z.string().min(1),
@@ -35,13 +41,17 @@ function supplierName(row: Record<string, unknown>) {
   return String(row.name ?? row.supplierName ?? row.id ?? "");
 }
 
-function fieldLabel(row: Record<string, unknown>) {
-  return String(row.fieldLabel ?? row.label ?? row.fieldKey ?? "Field");
-}
-
 function fieldKey(row: Record<string, unknown>) {
   return String(row.fieldKey ?? row.key ?? "");
 }
+
+type InviteSummary = {
+  requestId: string;
+  uploadUrl: string;
+  supplier: string;
+  expiresAt?: unknown;
+  requestedEvidence: string[];
+};
 
 function requestedKeys(values: CreateForm, selectedFieldKeys: string[]) {
   const custom = values.requested_field_keys
@@ -55,7 +65,10 @@ function requestedKeys(values: CreateForm, selectedFieldKeys: string[]) {
 }
 
 export function RequestsScreen() {
-  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [inviteSummary, setInviteSummary] = useState<InviteSummary | null>(
+    null,
+  );
+  const [copied, setCopied] = useState(false);
   const [selectedFieldKeys, setSelectedFieldKeys] = useState<string[]>([]);
   const queryClient = useQueryClient();
   const requests = useQuery({
@@ -119,8 +132,21 @@ export function RequestsScreen() {
       );
       return { invite, request };
     },
-    onSuccess: ({ invite }) => {
-      setInviteUrl(String(invite.uploadUrl ?? ""));
+    onSuccess: ({ invite, request }, values) => {
+      const supplier = supplierRows.find(
+        (row) => String(row.id) === values.supplier_id,
+      );
+      const requestedEvidence = requestedKeys(values, selectedFieldKeys)?.map(
+        humanizeKey,
+      ) ?? ["All missing Battery Passport readiness evidence"];
+      setInviteSummary({
+        requestId: String(request.id ?? ""),
+        uploadUrl: String(invite.uploadUrl ?? ""),
+        supplier: supplier ? supplierName(supplier) : "Product supplier",
+        expiresAt: invite.expiresAt ?? invite.expires_at,
+        requestedEvidence,
+      });
+      setCopied(false);
       setSelectedFieldKeys([]);
       form.reset();
       queryClient.invalidateQueries({ queryKey: ["evidence-requests"] });
@@ -132,7 +158,24 @@ export function RequestsScreen() {
         `/evidence-requests/${id}/supplier-invites`,
         { method: "POST", body: { expiresInDays: 14 } },
       ),
-    onSuccess: (data) => setInviteUrl(String(data.uploadUrl ?? "")),
+    onSuccess: (data, requestId) => {
+      const request = rows.find((row) => String(row.id) === requestId);
+      setInviteSummary({
+        requestId,
+        uploadUrl: String(data.uploadUrl ?? ""),
+        supplier: String(request?.supplierName ?? "Supplier"),
+        expiresAt: data.expiresAt ?? data.expires_at,
+        requestedEvidence: ["Requested evidence for this supplier request"],
+      });
+      setCopied(false);
+    },
+  });
+  const reminder = useMutation({
+    mutationFn: (id: string) =>
+      apiFetch(`/evidence-requests/${id}/send-reminder`, {
+        method: "POST",
+        body: {},
+      }),
   });
   const rows = toArray<Record<string, unknown>>(requests.data);
 
@@ -148,7 +191,7 @@ export function RequestsScreen() {
     <>
       <PageHeading
         title="Evidence Requests"
-        description="Select a product, choose evidence blockers, and send a supplier upload link."
+        description="Choose what evidence is missing, then create a supplier upload link."
       />
       <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
         <Card>
@@ -202,7 +245,7 @@ export function RequestsScreen() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Suggested evidence fields</Label>
+                <Label>Suggested evidence requirements</Label>
                 {!selectedProductId ? (
                   <p className="text-sm text-slate-500">
                     Select a product to load missing, conflicting and expired
@@ -236,11 +279,12 @@ export function RequestsScreen() {
                           />
                           <span>
                             <span className="font-medium text-slate-900">
-                              {fieldLabel(field)}
+                              {evidenceLabel(field)}
                             </span>
-                            <span className="ml-2 text-xs text-slate-500">
-                              {String(field.status ?? "")}
-                            </span>
+                            <StatusText
+                              className="ml-2"
+                              value={field.status ?? "needed"}
+                            />
                           </span>
                         </label>
                       );
@@ -248,16 +292,21 @@ export function RequestsScreen() {
                   </div>
                 ) : null}
               </div>
-              <div>
-                <Label htmlFor="requested_field_keys">
-                  Additional field keys
-                </Label>
-                <Input
-                  id="requested_field_keys"
-                  placeholder="carbon_footprint, recycled_content"
-                  {...form.register("requested_field_keys")}
-                />
-              </div>
+              <details className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                <summary className="cursor-pointer text-sm font-medium text-slate-700">
+                  Advanced: add technical evidence keys
+                </summary>
+                <div className="mt-3">
+                  <Label htmlFor="requested_field_keys">
+                    Technical evidence keys
+                  </Label>
+                  <Input
+                    id="requested_field_keys"
+                    placeholder="carbon_footprint, recycled_content"
+                    {...form.register("requested_field_keys")}
+                  />
+                </div>
+              </details>
               {products.isError ? <ErrorNote error={products.error} /> : null}
               {suppliers.isError ? <ErrorNote error={suppliers.error} /> : null}
               {createAndInvite.isError ? (
@@ -276,16 +325,58 @@ export function RequestsScreen() {
           </CardHeader>
           <CardContent className="space-y-3">
             {requests.isError ? <ErrorNote error={requests.error} /> : null}
-            {inviteUrl ? (
-              <div className="flex items-center justify-between gap-3 rounded-md border border-teal-200 bg-teal-50 p-3 text-sm">
-                <span className="truncate text-teal-900">{inviteUrl}</span>
-                <Button
-                  variant="secondary"
-                  onClick={() => navigator.clipboard.writeText(inviteUrl)}
-                >
-                  <Copy className="size-4" />
-                  Copy
-                </Button>
+            {inviteSummary ? (
+              <div className="space-y-3 rounded-lg border border-teal-200 bg-teal-50 p-3 text-sm text-teal-950">
+                <div>
+                  <div className="font-semibold">Supplier link is ready</div>
+                  <div className="mt-1 text-teal-800">
+                    {inviteSummary.supplier} can upload evidence until{" "}
+                    {formatDateTime(inviteSummary.expiresAt)}.
+                  </div>
+                </div>
+                <div className="rounded-md bg-white/70 p-2">
+                  <div className="text-xs font-medium uppercase tracking-wide text-teal-700">
+                    Requested evidence
+                  </div>
+                  <div className="mt-1">
+                    {inviteSummary.requestedEvidence.join(", ")}
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      navigator.clipboard.writeText(inviteSummary.uploadUrl);
+                      setCopied(true);
+                    }}
+                  >
+                    <Copy className="size-4" />
+                    {copied ? "Copied" : "Copy link"}
+                  </Button>
+                  <a
+                    className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 hover:bg-slate-50"
+                    href={inviteSummary.uploadUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open supplier page
+                  </a>
+                  <Button
+                    variant="ghost"
+                    onClick={() => reminder.mutate(inviteSummary.requestId)}
+                    disabled={reminder.isPending}
+                  >
+                    Send reminder
+                  </Button>
+                </div>
+                {reminder.isSuccess ? (
+                  <InlineState
+                    title="Reminder queued."
+                    detail="The notification outbox will handle delivery."
+                    tone="success"
+                  />
+                ) : null}
+                {reminder.isError ? <ErrorNote error={reminder.error} /> : null}
               </div>
             ) : null}
             {rows.length === 0 ? (
@@ -335,7 +426,7 @@ export function RequestsScreen() {
                             onClick={() => invite.mutate(String(row.id))}
                             disabled={invite.isPending}
                           >
-                            Create
+                            Create invite link
                           </Button>
                         </TCell>
                       </tr>
